@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebSocket Server demo</title>
+  </head>
+  <body>
+    <h1>WebSocket Server demo</h1>
+    <p>Welcome</p>
+
+    <input id="msg" type="text" style="width: 200px;" value="12345">
+    <br/><br/><br/>
+
+    <!--<span>socket.io server</span>
+    <button onclick="connect1()">connect</button>
+    <button onclick="sendMsg1()">send</button>-->
+
+    <br/><br/><br/>
+
+    <span>custom server</span>
+    <button onclick="connect2()">connect</button>
+    <button onclick="sendMsg2()">send</button>
+
+
+    <script type="text/javascript">
+        var socket1, socket2;
+
+        /*function connect1(){
+//            if(socket1Flag) return ;
+//            socket1Flag = true;
+
+            socket1 = io();
+
+            socket1.on('connect', function(){
+                console.log('socket.io server connected.')
+            })
+
+            socket1.on('message', function(msg){
+                console.log('message from server: ', msg);
+            })
+
+            socket1.on('event1', function(msg){
+                console.log(msg);
+            })
+        }
+
+        function sendMsg1(){
+            socket1.emit('event3', document.getElementById('msg').value);
+        }*/
+
+
+        function connect2(){
+            socket2 = new WebSocket('ws://localhost:9999');
+
+            socket2.onopen = function(e){
+                console.log('custom ws server connected.')
+            };
+
+            socket2.onmessage = function(e){
+                console.log('message from server: ', e);
+            };
+
+            socket2.onerror = function(e){
+                console.log('error: ', e);
+            };
+
+            socket2.onclose = function(e){
+                console.log('close: ', e);
+            };
+        }
+
+        function sendMsg2(){
+            socket2.send(document.getElementById('msg').value);
+        }
+
+    </script>
+
+  </body>
+</html>
