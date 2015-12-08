@@ -186,15 +186,20 @@ function onData(data){
         reqContent = parseWSRequest(reqContent);
         var key = genWSHandshakeKey(reqContent.headers["Sec-WebSocket-Key"]);
 //        console.log('response key:', key);
-        this.header = reqContent;
+        this.method = reqContent.method;
+        this.path = reqContent.path;
+        this.httpVersion = reqContent.httpVersion;
+        this.handshakeHeaders = reqContent.headers;
         this.write(resTemplate.replace('{{key}}', key));
         this.sendFrame('Hello my friend, '+Math.random());
     }else{
-        var content = parseFrame(data);
+        var content = parseFrame.call(this, data, function (d) {
+            console.log('from client:', d.toString());
+        });
     }
 }
 
-function parseFrame(data){
+function parseFrame(data, callback){
     var d0 = data[0],
         d1 = data[1];
     var fin = getBit(d0, 1),
@@ -206,17 +211,46 @@ function parseFrame(data){
         len = getBit(d1, 2, 7);   // Read bits 9-15 (inclusive) and interpret that as an unsigned integer.
     console.log('FIN', fin, 'rsv123', rsv1, rsv2, rsv3, 'opcode', opcode, 'mask', mask, 'len', len);
 
+    switch(opcode){
+        case 0x0:  // continuation
+            console.log('to be continued.');
+            break;
+        case 0x1:  // text
+            console.log('payload in text.');
+            break;
+        case 0x2:  // binary
+            console.log('payload in binary.');
+            break;
+        case 0x8:  // close event
+            console.log('client closed connection.');
+            closeConnection(this);
+            break;
+        case 0x9:  // ping event
+            console.log('ping event.');
+            break;
+        case 0xa:  // pong event
+            console.log('pong event.');
+            break;
+    }
+
+    var decoded;
     var offset=2;
     if(len < 126){ // If it's 125 or less, then that's the length; you're done.
-        var maskKeys = new Buffer([data[offset++], data[offset++], data[offset++], data[offset++]]);
-//        console.log('maskKeys:', maskKeys.toBinString());
-        var decoded = new Buffer(len);
-        for(var i=0; i+offset<data.length; i++){
-            decoded[i] = data[i+offset] ^ maskKeys[i%4];
-//            console.log(data[i+offset] + ' ^ ' + maskKeys[i%4] + ' = ' + decoded[i]);
+        var unmasked = new Buffer(len);
+        if(mask){
+            var maskKeys = new Buffer([data[offset++], data[offset++], data[offset++], data[offset++]]);
+            for(var i=0; i+offset<data.length; i++){
+                unmasked[i] = data[i+offset] ^ maskKeys[i%4];
+            }
+            console.log(unmasked.toHexString());
+        }else{
+            data.copy(unmasked, 0, offset);
         }
-        console.log(decoded.toHexString());
-        inflate(decoded); // TODO: check if frame need to be inflated.
+
+        if(this.handshakeHeaders[WS_EXTENSIONS].indexOf('permessage-deflate') >= 0 && rsv1 == 1)
+            decoded = inflate(unmasked, callback);
+        else
+            callback(unmasked);
 
     }else if(len == 126){ // Read the next 16 bits and interpret those as an unsigned integer. You're done.
         console.log('len = 126 ...');
@@ -224,7 +258,7 @@ function parseFrame(data){
         console.log('len = 127 ...');
     }
 
-    return decoded.toString('utf8');
+//    return decoded.toString('utf8');
 }
 
 /**
@@ -243,6 +277,10 @@ function isHandshake(data){
             String.fromCharCode(data[1]) == 'E' &&
             String.fromCharCode(data[2]) == 'T'
 }
+
+
+var WS_ACCEPT = "Sec-WebSocket-Accept";
+var WS_EXTENSIONS = "Sec-WebSocket-Extensions";
 
 var resTemplate = "HTTP/1.1 101 Switching Protocols\r\n" +
                   "Upgrade: websocket\r\n" +
@@ -276,60 +314,56 @@ function genWSHandshakeKey(key){
 }
 
 
-function inflate(buf) {
+function inflate(buf, callback) {
     var raw = zlib.createInflateRaw(); // {windowBits:15}
-    raw.on('data', function (d) {
-        console.log(d.toString());
-    });
+    raw.on('data', callback);
     raw.write(buf);
     raw.write(new Buffer([0x00, 0x00, 0xff, 0xff]));
     raw.flush();
 }
 
-
-var sockets = [];
-
-var WSHandler = function(){
-    this.name = 'WSHandler'+parseInt(Math.random()*99999);
-    this.socket ;
+// TODO: what to do when client close socket ..
+function closeConnection(socket){
+    socket.end();
+//    socket.destroy();
 }
 
-WSHandler.prototype.onData = onData;
 
-WSHandler.prototype.handler = function(socket){
-    console.log('client connected.', this.name);
-    this.socket = socket;
-    sockets.push(socket);
+var sockets = new WeakSet();
 
-    this.socket.on('data', this.onData);
+net.Socket.prototype.name = 'WSHandler'+parseInt(Math.random()*99999);
+net.Socket.prototype.path = "";
+net.Socket.prototype.handshakeHeaders = {};
 
-    this.socket.on('close', function(){
+function handler(socket){
+    console.log('client connected.');
+    sockets.add(socket);
+
+    socket.on('data', onData);
+
+    socket.on('close', function(){
         console.log('socket close');
+        sockets.delete(socket);
     })
-
-    this.socket.on('connect', function(){
+    socket.on('connect', function(){
         console.log('socket connect');
     })
-
-    this.socket.on('drain', function(){
+    socket.on('drain', function(){
         console.log('socket drain');
     })
-
-    this.socket.on('error', function(){
+    socket.on('error', function(){
         console.log('socket error');
     })
-
-    this.socket.on('lookup', function(){
+    socket.on('lookup', function(){
         console.log('socket lookup');
     })
-
-    this.socket.on('timeout', function(){
+    socket.on('timeout', function(){
         console.log('socket timeout');
     })
 }
 
 
-var server = net.createServer(function(socket){var wsHandler = new WSHandler(); wsHandler.handler.call(wsHandler, socket);});
+var server = net.createServer(handler);
 
 server.listen(9999, function(){
     console.log('server bound');

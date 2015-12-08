@@ -19,6 +19,7 @@
     <span>custom server</span>
     <button onclick="connect2()">connect</button>
     <button onclick="sendMsg2()">send</button>
+    <button onclick="close2()">close</button>
 
 
     <script type="text/javascript">
@@ -70,6 +71,10 @@
 
         function sendMsg2(){
             socket2.send(document.getElementById('msg').value);
+        }
+
+        function close2(){
+            socket2.close();
         }
 
     </script>
