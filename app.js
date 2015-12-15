@@ -53,137 +53,14 @@ var http = require('http');
 var crypto = require('crypto');
 var zlib = require('zlib');
 
-/**
- * FIN: 0, then the server will keep listening for more parts of the message;
- *      1, the server should consider the message delivered.
- * opcode: 0x0 for continuation,
- *         0x1 for text (which is always encoded in UTF-8),
- *         0x2 for binary
- *
- * NOW:
- * message is sent all in one frame, that means FIN is always 1.
- * and do not mask data.
- */
-function sendFrame(str){
-    console.log('\nsend frame:', str);
-    var contentBuf = new Buffer(str);
-    var contentLen = contentBuf.length,
-        payloadLen = 0,
-        extPayloadBuf,
-        extPayloadLen = 0,
-        mask = 0,
-        maskBuf,
-        headLen = 2;  // head1 and head2
-
-    /*if(contentLen > (1<<62)*2-1){  // 1<<62 == 1<<30
-        throw new Error('stop because of too much conent...');
-    }*/
-
-    if(contentLen >= (2<<16)-1){
-        payloadLen = 127;
-        extPayloadLen = contentLen;
-        extPayloadBuf = new Buffer(extPayloadLen);
-//        frameLen += 8;
-    }else if(contentLen >= 126){ //(1<<16)){
-        payloadLen = 126;
-        extPayloadLen = contentLen;
-        extPayloadBuf = new Buffer(extPayloadLen);
-//        frameLen += 2;
-    }else{
-        payloadLen = contentLen;
-//        frameLen += 0;
-    }
-
-    if(mask){
-        maskBuf = new Buffer(4);
-        maskBuf.fill(0); // temp mask
-//        frameLen += 4;
-    }
-
-//    console.log('content len', contentLen, 'payload len', payloadLen);
-
-    var headBuf = new Buffer(2);
-    headBuf[0] = 128 + 1;   // 10000001
-    headBuf[1] = (mask << 7) + payloadLen;
-
-    var buffers = [headBuf];
-    if(extPayloadBuf)
-        buffers.push(extPayloadBuf);
-    if(mask)
-        buffers.push(maskBuf);
-
-    buffers.push(contentBuf);
-
-    var frameBuf = Buffer.concat(buffers);
-//    console.log('frame len', frameBuf.length, frameBuf.toBinString());
-
-    this.write(frameBuf);
-    console.log('frame sent.\n');
-}
-
-net.Socket.prototype.sendFrame = sendFrame;
-
-function toBinString(){
-    var r = "<Buffer ";
-    var len = Math.min(20, this.length);
-    for(var i=0; i<len; i++){
-        r += fillByteString(this[i].toString(2));
-        if(i < len -1)
-            r += ",";
-    }
-    if(len < this.length)
-        r += ', ...... >';
-    else
-        r += '>';
-
-    return r;
-}
-
-Buffer.prototype.toBinString = toBinString;
-
-function toHexString(){
-    var r = "<Buffer ";
-    var len = Math.min(20, this.length);
-    for(var i=0; i<len; i++){
-        r += '0x'+this[i].toString(16);
-        if(i < len -1)
-            r += ",";
-    }
-    if(len < this.length)
-        r += ', ...... >';
-    else
-        r += '>';
-
-    return r;
-}
-Buffer.prototype.toHexString = toHexString;
-
-/**
- * @num
- * @stuff char to be filled with
- * @direction left/right;
- */
-function align(content, num, stuff, direction){
-    var target = content || "";
-    while(target.length < num){
-        if(direction == "left"){
-            target = stuff + target;
-        }else if(direction == "right"){
-            target += stuff;
-        }
-    }
-    return target;
-}
-function fillByteString(content){
-    return align(content, 8, '0', 'left');
-}
+require('./ws-simple/pre');
 
 
 function onData(data){
     console.log('\ndata length:', data.length); //, '\n', data.toHexString());
     if(isHandshake(data)){
         var reqContent = data.toString('utf8');
-        reqContent = parseWSRequest(reqContent);
+        reqContent = parseHandshakeRequest(reqContent);
         var key = genWSHandshakeKey(reqContent.headers["Sec-WebSocket-Key"]);
 //        console.log('response key:', key);
         this.method = reqContent.method;
@@ -193,8 +70,9 @@ function onData(data){
         this.write(resTemplate.replace('{{key}}', key));
         this.sendFrame('Hello my friend, '+Math.random());
     }else{
-        var content = parseFrame.call(this, data, function (d) {
-            console.log('from client:', d.toString());
+        var content = parseFrame.call(this, data, function (err, d) {
+            if(d)
+                console.log('from client:', d.toString());
         });
     }
 }
@@ -213,7 +91,10 @@ function parseFrame(data, callback){
 
     switch(opcode){
         case 0x0:  // continuation
-            console.log('to be continued.');
+            if(fin)
+                console.log('last frame');
+            else
+                console.log('inter frame.');
             break;
         case 0x1:  // text
             console.log('payload in text.');
@@ -224,7 +105,7 @@ function parseFrame(data, callback){
         case 0x8:  // close event
             console.log('client closed connection.');
             closeConnection(this);
-            break;
+            return;
         case 0x9:  // ping event
             console.log('ping event.');
             break;
@@ -242,15 +123,16 @@ function parseFrame(data, callback){
             for(var i=0; i+offset<data.length; i++){
                 unmasked[i] = data[i+offset] ^ maskKeys[i%4];
             }
-            console.log(unmasked.toHexString());
+            console.log('unmasked:',unmasked.toHexString());
+            console.log('unmasked:',unmasked.toBinString());
         }else{
             data.copy(unmasked, 0, offset);
         }
 
         if(this.handshakeHeaders[WS_EXTENSIONS].indexOf('permessage-deflate') >= 0 && rsv1 == 1)
-            decoded = inflate(unmasked, callback);
+            decoded = inflate(unmasked, fin,  callback);
         else
-            callback(unmasked);
+            callback(null, unmasked);
 
     }else if(len == 126){ // Read the next 16 bits and interpret those as an unsigned integer. You're done.
         console.log('len = 126 ...');
@@ -288,7 +170,7 @@ var resTemplate = "HTTP/1.1 101 Switching Protocols\r\n" +
                   "Sec-WebSocket-Accept: {{key}}\r\n" +
                   "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n";
 
-function parseWSRequest(str){
+function parseHandshakeRequest(str){
     var arr = str.split('\r\n');
     var base = arr[0].split(' ');
     if(base.length <3)
@@ -313,17 +195,45 @@ function genWSHandshakeKey(key){
     return crypto.createHash('sha1').update(key+magicString).digest('base64');
 }
 
+// seems each client WebSocket holds a code-map, so we should hold a inflater instance for each client.
+// when 2 clients use the same inflater, message are mixed.
+var raw = zlib.createInflateRaw(); // {windowBits:15}
+function inflate(buf, fin, callback) {
 
-function inflate(buf, callback) {
-    var raw = zlib.createInflateRaw(); // {windowBits:15}
-    raw.on('data', callback);
+    var buffers = [];
+
+    function onInflateError(err){
+        cleanup(raw);
+        console.log('error when inflating frame payload:', err.toString());
+        callback(err);
+    }
+
+    function onInflateData(data){
+        buffers.push(data);
+    }
+
+    function cleanup(raw){
+        raw.removeListener('error', onInflateError);
+        raw.removeListener('data', onInflateData);
+    }
+
+    raw.on('data', onInflateData);
+    raw.on('error', onInflateError);
+
     raw.write(buf);
-    raw.write(new Buffer([0x00, 0x00, 0xff, 0xff]));
-    raw.flush();
+    if(fin)
+        raw.write(new Buffer([0x00, 0x00, 0xff, 0xff]));
+
+    raw.flush(function(){
+        cleanup(raw);
+        callback(null, Buffer.concat(buffers));
+    });
 }
+
 
 // TODO: what to do when client close socket ..
 function closeConnection(socket){
+    sockets.delete(socket);
     socket.end();
 //    socket.destroy();
 }
@@ -365,11 +275,25 @@ function handler(socket){
 
 var server = net.createServer(handler);
 
-server.listen(9999, function(){
+/*server.listen(9999, function(){
     console.log('server bound');
+})*/
+
+server.on('connection', function(e){
+    console.log('server connection');
 })
 
+server.on('listening', function(e){
+    console.log('server listening');
+})
 
+server.on('error', function(e){
+    console.log('server error', e);
+})
+
+server.on('close', function(e){
+    console.log('server close');
+})
 
 /*
 http.createServer(function(req, res){
