@@ -9,6 +9,13 @@
 
 var ws = require('./ws-simple');
 
-var wsSocket = ws.createServer(9999, function(content){
-    console.log('from ws-simple:', content);
+var clientMap = new Map(); // client -> WSSocket
+
+var server = ws.createServer(9999, function(wsSocket, content){
+    console.log('got message:', content);
+
+    wsSocket.send('automitical echo from server.');
+//    wsSocket.sendToAll(content);
+    wsSocket.sendToOther(content);
+
 })

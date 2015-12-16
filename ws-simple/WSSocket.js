@@ -12,6 +12,7 @@ var zlib = require('zlib');
 
 function WSSocket(socket, listener){
     var self = this;
+    this._id = parseInt(Math.random()*99999999);
     this.socket = socket;
     this.listener = listener;
     this.method = "";
@@ -32,7 +33,7 @@ function WSSocket(socket, listener){
     }
 
     function onData(data){
-        console.log('\ndata length:', data.length); //, '\n', data.toHexString());
+//        console.log('\n >>> incoming data length:', data.length); //, '\n', data.toHexString());
         if(isHandshake(data)){
             var reqContent = data.toString('utf8');
             reqContent = parseHandshakeRequest(reqContent);
@@ -41,27 +42,28 @@ function WSSocket(socket, listener){
             self.httpVersion = reqContent.httpVersion;
             self.handshakeHeaders = reqContent.headers;
             responseToHandshake();
-            self.sendFrame('Hello my friend, '+Math.random());
+            self.send('Hello my friend, '+ parseInt(Math.random()*10000));
         }else{
             parseFrame.call(self, data, function (err, d) {
                 if(d){
-//                console.log('from client:', d.toString());
-                    self.listener(d.toString());
+                    var content = d.toString();
+                    self.listener(self, content);
                 }
             });
         }
     }
     this.socket.on('data', onData);
 
-    /*socket.on('close', function(){
+    socket.on('close', function(){
         console.log('socket close');
-        sockets.delete(socket);
+        global.sockets.delete(socket);
+        global.socketMap.delete(socket);
     })
     socket.on('connect', function(){
         console.log('socket connect');
     })
     socket.on('drain', function(){
-        console.log('socket drain');
+//        console.log('socket drain');
     })
     socket.on('error', function(){
         console.log('socket error');
@@ -71,7 +73,7 @@ function WSSocket(socket, listener){
     })
     socket.on('timeout', function(){
         console.log('socket timeout');
-    })*/
+    })
 }
 
 WSSocket.prototype.write = function(data, encoding, callback){
@@ -121,7 +123,7 @@ function parseFrame(data, callback){
         opcode = getBit(d0, 5, 4),
         mask = getBit(d1, 1),
         len = getBit(d1, 2, 7);   // Read bits 9-15 (inclusive) and interpret that as an unsigned integer.
-    console.log('FIN', fin, 'rsv123', rsv1, rsv2, rsv3, 'opcode', opcode, 'mask', mask, 'len', len);
+    console.log('\n>>> incoming: FIN', fin, 'rsv123', rsv1, rsv2, rsv3, 'opcode', opcode, 'mask', mask, 'len', len);
 
     switch(opcode){
         case 0x0:  // continuation
@@ -148,7 +150,6 @@ function parseFrame(data, callback){
             break;
     }
 
-    var decoded;
     var offset=2;
     if(len < 126){ // If it's 125 or less, then that's the length; you're done.
         var unmasked = new Buffer(len);
@@ -157,8 +158,6 @@ function parseFrame(data, callback){
             for(var i=0; i+offset<data.length; i++){
                 unmasked[i] = data[i+offset] ^ maskKeys[i%4];
             }
-            console.log('unmasked:',unmasked.toHexString());
-            console.log('unmasked:',unmasked.toBinString());
         }else{
             data.copy(unmasked, 0, offset);
         }
@@ -174,7 +173,6 @@ function parseFrame(data, callback){
         console.log('len = 127 ...');
     }
 
-//    return decoded.toString('utf8');
 }
 
 /**
@@ -243,16 +241,14 @@ function inflate(buf, fin, callback) {
  * message is sent all in one frame, that means FIN is always 1.
  * and do not mask data.
  */
-function sendFrame(str){
-    console.log('\nsend frame:', str);
+function send(str){
     var contentBuf = new Buffer(str);
     var contentLen = contentBuf.length,
         payloadLen = 0,
         extPayloadBuf,
         extPayloadLen = 0,
         mask = 0,
-        maskBuf,
-        headLen = 2;  // head1 and head2
+        maskBuf;
 
     /*if(contentLen > (1<<62)*2-1){  // 1<<62 == 1<<30
      throw new Error('stop because of too much conent...');
@@ -262,24 +258,18 @@ function sendFrame(str){
         payloadLen = 127;
         extPayloadLen = contentLen;
         extPayloadBuf = new Buffer(extPayloadLen);
-//        frameLen += 8;
-    }else if(contentLen >= 126){ //(1<<16)){
+    }else if(contentLen >= 126){
         payloadLen = 126;
         extPayloadLen = contentLen;
         extPayloadBuf = new Buffer(extPayloadLen);
-//        frameLen += 2;
     }else{
         payloadLen = contentLen;
-//        frameLen += 0;
     }
 
     if(mask){
         maskBuf = new Buffer(4);
         maskBuf.fill(0); // temp mask
-//        frameLen += 4;
     }
-
-//    console.log('content len', contentLen, 'payload len', payloadLen);
 
     var headBuf = new Buffer(2);
     headBuf[0] = 128 + 1;   // 10000001
@@ -294,13 +284,28 @@ function sendFrame(str){
     buffers.push(contentBuf);
 
     var frameBuf = Buffer.concat(buffers);
-//    console.log('frame len', frameBuf.length, frameBuf.toBinString());
 
     this.write(frameBuf);
-    console.log('frame sent.\n');
+    console.log('\nframe sent:', str);
 }
+WSSocket.prototype.send = send;
 
-WSSocket.prototype.sendFrame = sendFrame;
+function sendToOther(str){
+    console.log('sent to Other:', str);
+    for(var wsSocket of global.sockets.keys()){
+        if(wsSocket != this)
+            wsSocket.send(str);
+    }
+}
+WSSocket.prototype.sendToOther = sendToOther;
+
+function sendToAll(str){
+    console.log('sent to All:', str);
+    for(var wsSocket of global.sockets.keys()){
+        wsSocket.send(str);
+    }
+}
+WSSocket.prototype.sendToAll = sendToAll;
 
 
 module.exports = WSSocket;

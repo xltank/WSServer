@@ -9,8 +9,8 @@ var net = require('net');
 require('./pre');
 var WSSocket = require('./WSSocket');
 
-var sockets = new WeakSet();
-var socketMap = new WeakMap(); // net.socket -> WSSocket
+global.sockets = new Set(); // WSSocket set
+global.socketMap = new Map(); // net.socket -> WSSocket
 
 /**
  * @port
