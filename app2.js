@@ -11,22 +11,22 @@ var ws = require('./ws-simple');
 
 var clientMap = new Map(); // client -> WSSocket
 
-/*var server = ws.createServer(9999, function(wsSocket, content){
+var server = ws.createServer(9999, function(wsSocket, content){
+    console.log(wsSocket._id + ' send ' + content);
+
+    wsSocket.send('automitical echo from server.');
+//    wsSocket.sendToAll(content);
+    wsSocket.sendToOther(content);
+})
+
+
+/*var server = ws.createServer2(9999, function(wsSocket, content){
     console.log('got message:', content);
 
     wsSocket.send('automitical echo from server.');
 //    wsSocket.sendToAll(content);
     wsSocket.sendToOther(content);
 })*/
-
-
-var server = ws.createServer2(9999, function(wsSocket, content){
-    console.log('got message:', content);
-
-    wsSocket.send('automitical echo from server.');
-//    wsSocket.sendToAll(content);
-    wsSocket.sendToOther(content);
-})
 
 
 

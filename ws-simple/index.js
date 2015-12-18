@@ -28,26 +28,6 @@ module.exports.createServer = function(port, listener){
 
         global.sockets.add(wsSocket);
         global.socketMap.set(socket, wsSocket);
-
-        socket.on('close', function(){
-            console.log('socket close');
-            global.sockets.delete(socket);
-        })
-        socket.on('connect', function(){
-            console.log('socket connect');
-        })
-        socket.on('drain', function(){
-            console.log('socket drain');
-        })
-        socket.on('error', function(){
-            console.log('socket error');
-        })
-        socket.on('lookup', function(){
-            console.log('socket lookup');
-        })
-        socket.on('timeout', function(){
-            console.log('socket timeout');
-        })
     });
 
     server.listen(port, function(){

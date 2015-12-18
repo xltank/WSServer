@@ -8,17 +8,41 @@ var net = require('net');
 var http = require('http');
 var crypto = require('crypto');
 var zlib = require('zlib');
+var PerMessageDeflater = require('./PerMessageDeflater');
+var consts = require('./consts');
 
 
 function WSSocket(socket, listener){
     var self = this;
-    this._id = parseInt(Math.random()*99999999);
+    this._id = parseInt(Math.random()*999);
     this.socket = socket;
     this.listener = listener;
     this.method = "";
     this.path = "";
     this.httpVersion = "";
     this.handshakeHeaders = "";
+    this.inflater = null;
+
+    socket.on('close', function(){
+        console.log('socket close');
+        global.sockets.delete(self);
+        global.socketMap.delete(socket);
+    })
+    socket.on('connect', function(){
+        console.log('socket connect');
+    })
+    socket.on('drain', function(){
+        console.log('socket drain');
+    })
+    socket.on('error', function(){
+        console.log('socket error');
+    })
+    socket.on('lookup', function(){
+        console.log('socket lookup');
+    })
+    socket.on('timeout', function(){
+        console.log('socket timeout');
+    })
 
     var responseToHandshake = function(){
         var resTemplate = "HTTP/1.1 101 Switching Protocols\r\n" +
@@ -27,13 +51,11 @@ function WSSocket(socket, listener){
             "Sec-WebSocket-Accept: {{key}}\r\n" +
             "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n";
         var key = genWSHandshakeKey(self.handshakeHeaders["Sec-WebSocket-Key"]);
-//    console.log('response key:', key);
 
         self.write(resTemplate.replace('{{key}}', key));
     }
 
     function onData(data){
-//        console.log('\n >>> incoming data length:', data.length); //, '\n', data.toHexString());
         if(isHandshake(data)){
             var reqContent = data.toString('utf8');
             reqContent = parseHandshakeRequest(reqContent);
@@ -42,9 +64,9 @@ function WSSocket(socket, listener){
             self.httpVersion = reqContent.httpVersion;
             self.handshakeHeaders = reqContent.headers;
             responseToHandshake();
-            self.send('Hello my friend, '+ parseInt(Math.random()*10000));
+            self.send('Hello my friend, '+ self._id);
         }else{
-            parseFrame.call(self, data, self.handshakeHeaders[WS_EXTENSIONS], function (err, d) {
+            parseFrame.call(self, data, self.handshakeHeaders[consts.WS_EXTENSIONS], function (err, d) {
                 if(d){
                     var content = d.toString();
                     self.listener(self, content);
@@ -55,7 +77,7 @@ function WSSocket(socket, listener){
     this.socket.on('data', onData);
 
     socket.on('close', function(){
-        console.log('socket close');
+        console.log('socket close'); // TODO: why twice ?
         global.sockets.delete(socket);
         global.socketMap.delete(socket);
     })
@@ -140,7 +162,7 @@ function parseFrame(data, extension, callback){
             break;
         case 0x8:  // close event
             console.log('client closed connection.');
-            this.close(); //TODO: do not use 'this'
+            this.close(); //TODO: or emit close event?
             return;
         case 0x9:  // ping event
             console.log('ping event.');
@@ -162,17 +184,20 @@ function parseFrame(data, extension, callback){
             data.copy(unmasked, 0, offset);
         }
 
-        if(extension.indexOf('permessage-deflate') >= 0 && rsv1 == 1)
-            inflate.call(this, unmasked, fin,  callback);
-        else
+        if(extension.indexOf('permessage-deflate') >= 0 && rsv1 == 1){
+            if(!this.inflater)
+                this.inflater = new PerMessageDeflater();
+            this.inflater.inflate(unmasked, fin, callback);
+        }
+        else {
             callback(null, unmasked);
+        }
 
     }else if(len == 126){ // Read the next 16 bits and interpret those as an unsigned integer. You're done.
         console.log('len = 126 ...');
     }else if(len == 127){ // Read the next 64 bits and interpret those as an unsigned integer (The most significant bit MUST be 0). You're done.
         console.log('len = 127 ...');
     }
-
 }
 
 /**
@@ -184,49 +209,6 @@ function getBit(byte, pos, len){
     len = len || 1;
     return (byte >> (8 - pos - len + 1)) & ((1 << len) -1);
 }
-
-
-
-var WS_ACCEPT = "Sec-WebSocket-Accept";
-var WS_EXTENSIONS = "Sec-WebSocket-Extensions";
-
-// seems each client WebSocket holds a code-map, so we should hold a inflater instance for each client.
-// when 2 clients use the same inflater, message are mixed.
-function inflate(buf, fin, callback) {
-    var self = this;
-    if(!self.inflateRaw)
-        self.inflateRaw = zlib.createInflateRaw(); // {windowBits:15}
-
-    var buffers = [];
-
-    function onInflateError(err){
-        cleanup();
-        console.log('error when inflating frame payload:', err.toString());
-        callback(err);
-    }
-
-    function onInflateData(data){
-        buffers.push(data);
-    }
-
-    function cleanup(){
-        self.inflateRaw.removeListener('error', onInflateError);
-        self.inflateRaw.removeListener('data', onInflateData);
-    }
-
-    self.inflateRaw.on('data', onInflateData);
-    self.inflateRaw.on('error', onInflateError);
-
-    self.inflateRaw.write(buf);
-    if(fin)  // 7.2.1 in https://tools.ietf.org/html/draft-ietf-hybi-permessage-compression-28
-        self.inflateRaw.write(new Buffer([0x00, 0x00, 0xff, 0xff]));
-
-    self.inflateRaw.flush(function(){
-        cleanup();
-        callback(null, Buffer.concat(buffers));
-    });
-}
-
 
 
 
@@ -286,7 +268,7 @@ function send(str){
     var frameBuf = Buffer.concat(buffers);
 
     this.write(frameBuf);
-    console.log('\nframe sent:', str);
+    console.log('\n<<< frame sent:', str);
 }
 WSSocket.prototype.send = send;
 
@@ -308,11 +290,12 @@ function sendToAll(str){
 WSSocket.prototype.sendToAll = sendToAll;
 
 function close(){
-    this.socket.close();
+    this.socket.end();
     this.socket.destroy();
     this.socket = null;
     global.sockets.delete(this);
     global.socketMap.delete(this);
+    console.log('socket['+this._id+' is closed.');
 }
 WSSocket.prototype.close = close;
 
