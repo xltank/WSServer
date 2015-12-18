@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+</head>
+<body>
+    <div style="margin-left:50px;">
+        <span>Basic Demage: </span><span>10000</span><br/><br/>
+
+        <div style="width:400px; height: 200px; float: left; background-color: #e0e0e0; padding: 20px 20px;">
+            <span>Combo Ratio: </span><input id="combo1" type="number" max="100" min="0" value="0" onchange="onChange()">%<br/><br/>
+            <span>Combo Times: </span><input id="comboTimes1" type="number" max="10" min="3" value="3" onchange="onChange()">%<br/><br/>
+            <span>Crit Ratio : </span><input id="crit1" type="number" max="100" min="0" value="0" onchange="onChange()">%<br/><br/>
+            <span>Real Demage: </span><span id="realDemage1"></span>
+        </div>
+
+        <div style="width:400px; height: 200px; float: left; background-color: #e0e0e0; margin-left:50px; padding: 20px 20px;">
+            <span>Combo Ratio: </span><input id="combo2" type="number" max="100" min="0" value="0" onchange="onChange()">%<br/><br/>
+            <span>Combo Times: </span><input id="comboTimes2" type="number" max="10" min="3" value="3" onchange="onChange()">%<br/><br/>
+            <span>Crit Ratio : </span><input id="crit2" type="number" max="100" min="0" value="0" onchange="onChange()">%<br/><br/>
+            <span>Real Demage: </span><span id="realDemage2"></span>
+        </div>
+
+        <div style="width: 930px;clear:both; text-align: center; padding-top: 20px;">
+            <span>Demage Increment(right-left): </span><span id="increment">123123123</span>
+        </div>
+    </div>
+
+    <!--<canvas id="cvs" style="width: 300px; height: 300px;"></canvas>-->
+
+    <script type="text/javascript">
+//        var pen = document.getElementById('cvs').getContext('2d');
+
+        var comboDom1 = document.getElementById('combo1'),
+            comboTimesDom1 = document.getElementById('comboTimes1'),
+            critDom1 = document.getElementById('crit1'),
+            resultDom1 = document.getElementById('realDemage1'),
+            comboDom2 = document.getElementById('combo2'),
+            comboTimesDom2 = document.getElementById('comboTimes2'),
+            critDom2 = document.getElementById('crit2'),
+            resultDom2 = document.getElementById('realDemage2'),
+            incrementDom = document.getElementById('increment');
+
+        var getComboAddition = function(times, crit){
+            var r = 1,
+                    ratio=0.5;
+            while(times>0){
+                r+= ratio*(1+crit);
+                ratio/=2;
+                times --;
+            }
+            return r
+        }
+
+        function calc(combo, comboTimes, crit){
+            var comboResult = 1*combo*getComboAddition(comboTimes, crit);
+            var critResult = (1 - combo)*crit*2;
+            var generalResult = 1- combo - crit + combo*crit;
+//            console.log('> ', comboResult, critResult, generalResult);
+            return comboResult + critResult + generalResult
+        }
+
+        function onChange(){
+            var combo1 = comboDom1.value/100,
+                comboTimes1 = comboTimesDom1.value,
+                crit1 = critDom1.value/100,
+                combo2 = comboDom2.value/100,
+                comboTimes2 = comboTimesDom2.value,
+                crit2 = critDom2.value/100;
+
+            var r1 = calc(combo1, comboTimes1, crit1)*10000,
+                r2 = calc(combo2, comboTimes2, crit2)*10000;
+//            console.log('>>> ', r1, r2);
+            resultDom1.innerText = parseInt(r1);
+            resultDom2.innerText = parseInt(r2);
+            incrementDom.innerText = parseInt(r2 - r1);
+        }
+
+    </script>
+
+</body>
+</html>

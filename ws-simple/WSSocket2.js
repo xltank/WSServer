@@ -10,7 +10,12 @@ var crypto = require('crypto');
 var zlib = require('zlib');
 
 
-function WSSocket(socket, listener){
+var WS_KEY = "sec-websocket-key";
+var WS_ACCEPT = "sec-websocket-accept";
+var WS_EXTENSIONS = "sec-websocket-extensions";
+
+
+function WSSocket(headers, socket, listener){
     var self = this;
     this._id = parseInt(Math.random()*99999999);
     this.socket = socket;
@@ -18,7 +23,7 @@ function WSSocket(socket, listener){
     this.method = "";
     this.path = "";
     this.httpVersion = "";
-    this.handshakeHeaders = "";
+    this.handshakeHeaders = headers;
 
     var responseToHandshake = function(){
         var resTemplate = "HTTP/1.1 101 Switching Protocols\r\n" +
@@ -26,7 +31,7 @@ function WSSocket(socket, listener){
             "Connection: Upgrade\r\n" +
             "Sec-WebSocket-Accept: {{key}}\r\n" +
             "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n";
-        var key = genWSHandshakeKey(self.handshakeHeaders["Sec-WebSocket-Key"]);
+        var key = genWSHandshakeKey(self.handshakeHeaders[WS_EXTENSIONS]);
 //    console.log('response key:', key);
 
         self.write(resTemplate.replace('{{key}}', key));
@@ -44,7 +49,7 @@ function WSSocket(socket, listener){
             responseToHandshake();
             self.send('Hello my friend, '+ parseInt(Math.random()*10000));
         }else{
-            parseFrame.call(self, data, self.handshakeHeaders[WS_EXTENSIONS], function (err, d) {
+            parseFrame.call(self, data, function (err, d) {
                 if(d){
                     var content = d.toString();
                     self.listener(self, content);
@@ -56,8 +61,8 @@ function WSSocket(socket, listener){
 
     socket.on('close', function(){
         console.log('socket close');
-        global.sockets.delete(socket);
-        global.socketMap.delete(socket);
+//        global.sockets.delete(socket);
+//        global.socketMap.delete(socket);
     })
     socket.on('connect', function(){
         console.log('socket connect');
@@ -113,7 +118,7 @@ function genWSHandshakeKey(key){
     return crypto.createHash('sha1').update(key+magicString).digest('base64');
 }
 
-function parseFrame(data, extension, callback){
+function parseFrame(data, callback){
     var d0 = data[0],
         d1 = data[1];
     var fin = getBit(d0, 1),
@@ -140,7 +145,7 @@ function parseFrame(data, extension, callback){
             break;
         case 0x8:  // close event
             console.log('client closed connection.');
-            this.close(); //TODO: do not use 'this'
+            this.close();
             return;
         case 0x9:  // ping event
             console.log('ping event.');
@@ -162,7 +167,7 @@ function parseFrame(data, extension, callback){
             data.copy(unmasked, 0, offset);
         }
 
-        if(extension.indexOf('permessage-deflate') >= 0 && rsv1 == 1)
+        if(this.handshakeHeaders[WS_EXTENSIONS].indexOf('permessage-deflate') >= 0 && rsv1 == 1)
             inflate.call(this, unmasked, fin,  callback);
         else
             callback(null, unmasked);
@@ -185,10 +190,6 @@ function getBit(byte, pos, len){
     return (byte >> (8 - pos - len + 1)) & ((1 << len) -1);
 }
 
-
-
-var WS_ACCEPT = "Sec-WebSocket-Accept";
-var WS_EXTENSIONS = "Sec-WebSocket-Extensions";
 
 // seems each client WebSocket holds a code-map, so we should hold a inflater instance for each client.
 // when 2 clients use the same inflater, message are mixed.
